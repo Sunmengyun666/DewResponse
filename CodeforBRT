@@ -27,7 +27,7 @@ brt_sample <- function(i){
   
   # Select relevant columns and remove rows with missing values
   dewdf <- df %>% 
-    select(11:17) %>%
+    select(8:14) %>%
     filter(!is.na(.[1]))
   
   # Remove rows where dew duration is zero
