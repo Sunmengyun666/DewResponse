@@ -7,12 +7,12 @@ This repository contains R scripts for modeling and visualizing the effects of d
 ## Project Structure
 
 
-- `/BRTcode/jane_1390_sm_appendixs/` – Contains BRT helper functions (e.g., `brt.functions.R`)
-- `/BRTcode/mydt/` – Input folder for CSV files with dew-related variables
-- `/BRTcode/result/` – Stores model output files such as contribution tables
-- `/BRTcode/plt/` – Stores generated plots like violin plots and PDPs
-- `/BRTcode/CodeforBRT.R` – Main R script to run BRT models and generate plots
-- `/BRTcode/README.md` – Project documentation file (this file)
+- `/jane_1390_sm_appendixs/` – Contains BRT helper functions (e.g., `brt.functions.R`)
+- `/mydt/` – Input folder for CSV files with dew-related variables
+- `/result/` – Stores model output files such as contribution tables
+- `/plt/` – Stores generated plots like violin plots and PDPs
+- `/CodeforBRT.R` – Main R script to run BRT models and generate plots
+- `/README.md` – Project documentation file (this file)
 
 
 ---
