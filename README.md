@@ -11,7 +11,7 @@ This repository contains R scripts for modeling and visualizing the effects of d
 ├── mydt/                     # Input folder for CSV files with dew-related variables
 ├── result/                   # Stores model output files such as contribution tables
 ├── plt/                      # Stores generated plots like violin plots and PDPs
-├── run_brt_models.R          # Main R script to run BRT models and generate plots
+├── CodeforBRT.R              # Main R script to run BRT models and generate plots
 └── README.md                 # Project documentation file (this file)
 
 ---
