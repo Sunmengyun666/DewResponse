@@ -5,50 +5,50 @@ library(dplyr)
 
 source("/BRTcode/jane_1390_sm_appendixs/brt.functions.R")
 
-# read dt
+# Set directories for input data and output results
 mainDir <-"/BRTcode/mydt/"
 mainDir1 <- "/BRTcode/result/"
 
+# Read all CSV filenames from the input directory
 setwd(mainDir)
 filenames<-dir(mainDir,'*.csv')
 filepath<-sapply(filenames,function(x){
   paste(mainDir,x,sep='')
 })
 
-#++++++++++++++++++++ brt function ++++++++++++++++++
+#++++++++++++++++++++ BRT sampling function ++++++++++++++++++
 brt_sample <- function(i){
   # i=2
 
-  # read data
+  # Read the i-th CSV file
   df <- read.csv(filepath[i])
   savename <- substring(filenames[i],1,nchar(filenames[i])-7)
   print(savename)
   
-  # reorganize data
+  # Select relevant columns and remove rows with missing values
   dewdf <- df %>% 
     select(11:17) %>%
     filter(!is.na(.[1]))
   
-  # delete no dew event 
+  # Remove rows where dew duration is zero
   dewdf <- dewdf %>% filter(DewDur != 0)
 
-  # create a new dataframe for relative contribution of each predictor
+  # Prepare an empty data frame for storing relative contributions
   mycontri <- data.frame(row.names = c('DewDur','RH','Rn','SWC',
                                        'Ta', 'VPD'))
   
   
-  # create null list for Partial Dependent Plot
+  # Initialize empty lists for partial dependence plot (PDP) data
   n.plots <- nrow(mycontri)
   pred1 <- list(rep(NA,n.plots))
   p1 <- list(rep(NA,n.plots))
   
-  # run 100 times
+  # Run BRT 100 times with bootstrapping
   for (t in 1:100){
-    
-    # bootstrap sample
+    # Bootstrap sample
     brt.dt <- dewdf[sample(row.names(dewdf),nrow(dewdf),replace=T),]
     
-    # run model
+    # Train BRT model
     brt.tc3.lr001 <- gbm.step(data = brt.dt,
                               gbm.x = 2:7, gbm.y = 1,
                               family = "gaussian",
@@ -56,14 +56,14 @@ brt_sample <- function(i){
                               learning.rate = 0.001,
                               bag.fraction = 0.6)
     
-    # collect relative contribution 
+    # Store relative contribution
     mycontri <- cbind(mycontri,
                       rc=merge(brt.tc3.lr001$contributions['rel.inf'],
                                mycontri,
                                by = 'row.names',
                                all.x=TRUE)[,2])
 
-    # collect model perfamance information
+    # Store model performance metrics
     model_info <- data.frame(
       cv_correlation = brt.tc3.lr001$cv.statistics$correlation.mean,
       cv_corr_se = brt.tc3.lr001$cv.statistics$correlation.se,
@@ -79,9 +79,9 @@ brt_sample <- function(i){
       model_perf <- rbind(model_perf, model_info)
     }
     
-    # collect PDP data
+    # Store partial dependence data
     pred.names <- brt.tc3.lr001$gbm.call$predictor.names
-    
+
     for (b in 1:n.plots){
       resp.matrix <- plot.gbm(brt.tc3.lr001, i.var = b,
                               n.trees = brt.tc3.lr001$n.trees,
@@ -96,15 +96,17 @@ brt_sample <- function(i){
     }
   }
   
+  # Assign variable names to list elements
   for (x in 1:length(pred1)){
     names(pred1)[x] <- pred.names[x]
     names(p1)[x] <- pred.names[x]
   }
   
-  # output data
+  # Save relative contribution table
   write.table(mycontri, paste(mainDir1, savename, "_contri.csv", sep=""),
               sep=",")
-  
+
+  # Return all results
   myresult <- list(mycontri = mycontri,
                    model_perf = model_perf,
                    pred1 = pred1, 
@@ -113,17 +115,17 @@ brt_sample <- function(i){
   return(myresult)
 }
 
-#++++++++++++++++++++ run models ++++++++++++++++++
+#++++++++++++++++++++ Run models ++++++++++++++++++
 arid_result <- brt_sample(1)
 forest_result <- brt_sample(2)
 grass_result <- brt_sample(3)
 humid_result <- brt_sample(4)
 
-#++++++++++++++++++++ save results ++++++++++++++++++
+# Save all results
 save.image(paste(mainDir1,"brt_result.RData",sep = ""))
 
 
-########### violin plot ###########
+########### Create Violin Plots for Relative Contributions ###########
 rm(list=ls(all=TRUE))
 
 load("/BRTcode/result/brt_result.RData")
@@ -132,28 +134,29 @@ library(dplyr)
 library(ggplot2)
 library(cowplot)
 
-#++++++++++++++++++++ plot violin function ++++++++++++++++++
+#++++++++++++++++++++ Violin plot function ++++++++++++++++++
 vio_plt <- function(mydt, myname){
   # mydt <- forest_result
   # myname <- "Forests"
   
-  # read relative contribution
+  # Extract relative contribution table
   rc_dt <- mydt[[1]]
   
-  # Assign unique temporary column names
+  # Assign unique temporary column names to avoid duplication
   colnames(rc_dt) <- make.unique(colnames(rc_dt))
   
+  # Convert wide table to long format for ggplot
   long_df <- rc_dt %>%
     tibble::rownames_to_column(var = "fac") %>%  # Move row names to a column
     tidyr::pivot_longer(cols = -fac,                   # Use all columns except 'Variable'
                         names_to = "times",                    # New column for column names
                         values_to = "rc") 
   
-  # Reorder the 'Variable' column based on my desired order
+  # Reorder factor levels for plotting
   my_order <- c('DewDur','Ta','RH','Rn','VPD','SWC')
   long_df$fac <- factor(long_df$fac, levels = rev(my_order))
   
-  # Assign colors manually
+  # Define custom colors for each variable
   custom_colors <- c(
     "DewDur" = '#E78AC3',  
     "Ta" = '#FFD92F',
@@ -162,7 +165,7 @@ vio_plt <- function(mydt, myname){
     "VPD" = '#FC8D62',
     "SWC" = '#8DA0CB')
   
-  # plot violin
+  # Plot violin + boxplot
   p <- ggplot(long_df, aes(x = rc, y = fac, fill=fac))+
     geom_violin(width=1,color="white")+
     geom_boxplot(width=0.2,cex=0.4, position=position_dodge(0.9),outlier.size=1)+
@@ -195,13 +198,13 @@ vio_plt <- function(mydt, myname){
   return(p)
 }
 
-#++++++++++++++++++++ run violin function ++++++++++++++++++
+#++++++++++++++++++++ Run violin plot function ++++++++++++++++++
 p1 <- vio_plt(forest_result, "Forests")
 p2 <- vio_plt(grass_result, "Grasslands")
 p3 <- vio_plt(arid_result, "Arid Regions")
 p4 <- vio_plt(humid_result, "Humid Regions")
 
-#++++++++++++++++++++ save plot ++++++++++++++++++ 
+# Combine all plots into one figure
 combined_plot <- plot_grid(
   p1,p2,p3,p4,  
   labels = "auto",
@@ -209,6 +212,7 @@ combined_plot <- plot_grid(
   scale = c(0.95),
   nrow = 2, ncol = 2) 
 
+# Save combined plots
 save_plot_all <- '/BRTcode/plt/'
 
 save_plot(paste(save_plot_all, 'Vio_RC.jpg', sep=""),
@@ -221,21 +225,22 @@ save_plot(paste(save_plot_all, 'Vio_RC.pdf', sep=""),
           base_height = 10,
           base_width = 8)
 
-########### plot PDP ###########
+########### Create Partial Dependence Plots (PDPs) ###########
 rm(list=ls(all=TRUE))
 
-# load("/BRTcode/result/brt_result.RData")
+load("/BRTcode/result/brt_result.RData")
 
 library(dplyr)
 library(ggplot2)
 library(cowplot)
 
-#+++++++++++++++++++ plot PDP function +++++++++++++++++++++++++++++++
+#+++++++++++++++++++ PDP plotting function +++++++++++++++++++++++++++++++
 pdp_plt <- function(myfac, dt1, dt2, ob1, ob2){
   # myfac <- "DewDur"
   # dt1 <- forest_result; dt2 <- grass_result
   # ob1 <- "forest"; ob2 <- "grass"
   
+  # Calculate mean x and y values for PDP from first and second dataset
   fac_dt1 <- data.frame(
     x = apply(dt1[["pred1"]][[myfac]], 1, mean) %>% round(2),
     y = apply(dt1[["p1"]][[myfac]], 1, mean) %>% round(2),
@@ -248,9 +253,10 @@ pdp_plt <- function(myfac, dt1, dt2, ob1, ob2){
     trait = rep(ob2,times = 100)
   )
   
+  # Combine two data frames
   fac_dt <- rbind(fac_dt1, fac_dt2)
 
-  # plot PDP   
+  # Plot PDP with LOESS smoothing  
   pp <- ggplot(fac_dt, aes(x = x, y = y, color = trait)) +
     geom_smooth(method = 'loess', span = 0.65, size = 1.2, se = TRUE) +
     scale_color_manual(values = c("#D2A679", "#3CA69A")) +
@@ -268,20 +274,21 @@ pdp_plt <- function(myfac, dt1, dt2, ob1, ob2){
   return(pp)
 }
 
-#++++++++++++++++++++ run PDP function ++++++++++++++++++
+#++++++++++++++++++++ Run PDP plots ++++++++++++++++++
 p1 <- pdp_plt("DewDur",forest_result, grass_result,
               "Forests","Grasslands")
 
 p2 <- pdp_plt("DewDur",arid_result, humid_result,
               "Arid Regions","Humid Regions")
 
-#++++++++++++++++++++ save plot ++++++++++++++++++
+# Combine PDPs into one figure
 combined_plot <- plot_grid(p1,p2,
   labels = "auto",
   label_size = 20,
   scale = c(0.95),
   nrow = 1, ncol = 2) 
 
+# Save PDP plots
 save_plot_all <- '/BRTcode/plt/'
 
 save_plot(paste(save_plot_all, 'PDP.jpg', sep=""),
