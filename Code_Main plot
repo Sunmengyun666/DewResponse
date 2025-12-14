@@ -1,5 +1,6 @@
-# Description: 
-#################### plot Fig.2 ###########################
+# Description: This code is for drawing main plots in this study
+
+#################### Fig.2: The impacts of dew formation on vegetation productivity ###########################
 rm(list=ls(all=TRUE))
 
 library(ggplot2)
@@ -11,4 +12,351 @@ library(purrr)
 library(tidyr)
 library(ggpmisc)
 
-load("C:/3project/dew/my_result/V12/reorg_dt_morn.RData")
+load("/result/mydata.RData")
+
+# function
+all_plt <- function(mydf, classify_type, myvar, 
+                    plt_ymin, plt_ymax){
+  
+  # ------- Long format & filter variable -------
+  long_df <- mydf %>%
+    tidyr::gather(key = "partition", value = "value",
+                  z_GPP_DT, z_GPP_NT
+                  ) %>% 
+    filter(partition %in% myvar) %>%
+    filter(!is.na(value))
+  
+  # change order
+  long_df$DewType <- factor(long_df$DewType, levels = c("nodew", "dew"))
+  
+  # t-test function for dew and nodew
+  t_test <- function(df){
+    t_test_results <- df %>%
+      group_by(!!sym(classify_type)) %>%
+      do({
+        data_in_group <- .
+        
+        # Check if both 'nodew' and 'dew' are present in the dewtype
+        dewtypes_present <- all(c('nodew', 'dew') %in% unique(data_in_group$DewType))
+        
+        # Make sure there are at least 2 unique observations for each dewtype
+        dewtypes_ok <- sapply(c('nodew', 'dew'), function(dew) {
+          sum(data_in_group$DewType == dew) >= 2
+        })
+        
+        # If both dewtypes are present and each dewtype has at least 2 observations, conduct t-test
+        if(dewtypes_present && all(dewtypes_ok)) {
+          t_test_res <- t.test(value ~ DewType, data = data_in_group)
+          data.frame(
+            partition = unique(data_in_group$partition),
+            p_value = t_test_res$p.value,
+            estimate = t_test_res$estimate,
+            error_min = t_test_res$conf.int[1],
+            error_max = t_test_res$conf.int[2],
+            significant = t_test_res$p.value < 0.05
+          )
+        } else {
+          # if observation is not enough, return NA
+          data.frame(
+            partition = unique(data_in_group$partition),
+            p_value = NA,
+            estimate = NA,
+            conf_int = NA,
+            significant = NA
+          )
+        }
+      }) %>%
+      ungroup()
+    
+    # result
+    # print(t_test_results)
+    
+    # create annotate
+    t_test_results$significant <- ifelse(is.na(t_test_results$p_value), 'NA',
+                                         # the p_value retains two decimal places
+                                         ifelse(t_test_results$p_value < 0.001, "***",
+                                                ifelse(t_test_results$p_value < 0.01,"**",
+                                                       ifelse(t_test_results$p_value < 0.05, "*",
+                                                              ifelse(t_test_results$p_value < 0.1, paste("p=", formatC(t_test_results$p_value, format="f", digits=2),"`"),
+                                                                     paste("p=", formatC(t_test_results$p_value, format="f", digits=2)))))))
+    
+    return(t_test_results)
+  }
+  
+  t_test_results <- t_test(long_df)
+  
+  # +++++++++++++ plot +++++++++++++++++++++++
+  pp <- ggplot(long_df, aes(x = factor(!!sym(classify_type)),
+               y = value, fill = DewType)) +
+    geom_boxplot(outlier.shape = NA, 
+                 color = "black") +
+    scale_fill_manual(values = c("dew" = "#3a82b7", "nodew" = "white"))
+  
+  plot_data <- ggplot_build(pp)$data[[1]]
+  pp <- pp +
+    # Add orange horizontal lines for the means
+    geom_segment(data = plot_data,
+                 aes(x = x-0.17, xend = x + 0.17, y = middle, yend = middle),
+                 size = 2, 
+                 inherit.aes = FALSE,
+                 color = "#ff8b17")+
+    # Add black horizontal lines for upper
+    geom_segment(data = plot_data,
+                 aes(x = x-0.08, xend = x + 0.08, y = ymax, yend = ymax),
+                 inherit.aes = FALSE,
+                 color = "black")+ 
+    # all dew events
+    coord_cartesian(ylim = c(plt_ymin, plt_ymax))+
+    labs(x = "", y = myvar) +
+    theme_minimal()+ 
+    theme(
+      legend.position = "none",
+      panel.border = element_rect(colour = "black", fill=NA, size=1),
+      panel.grid = element_blank(),
+      axis.text.x = element_text(size=10),
+      axis.text.y = element_text(size=10),
+      axis.title.x = element_text(size=12),
+      axis.title.y = element_text(size=12),
+      axis.ticks.y = element_line(color = "black",size=1),
+      axis.ticks.x = element_line(color = "black",size=1),
+      axis.ticks.length = unit(0.15, "cm") 
+    )+ 
+    # add significance stars
+    geom_text(data = t_test_results, aes(x = !!sym(classify_type), y = plt_ymax-0.3, label = significant),
+              color = "black", size = 5, inherit.aes = FALSE)
+  
+  return(pp)
+}
+
+p1 <- all_plt(all_z,'veg','z_GPP_NT', -1, 4.0)
+p2 <- all_plt(all_z,'veg','z_GPP_DT', -1, 4.0)
+p3 <- all_plt(all_z,'region','z_GPP_NT',-1, 4.0)
+p4 <- all_plt(all_z,'region','z_GPP_DT',-1, 4.0)
+
+save_plot_all <- 'myplot/'
+
+library(cowplot)
+myplot <- plot_grid(p1,p3,p2,p4,
+                    nrow = 2,  # Specify number of rows
+                    ncol = 2,  # Specify number of columns
+                    labels = "auto",  # Automatically label the plots
+                    label_size = 20,  # Label size
+                    scale = c(0.95))  # Scale the plots
+
+save_plot(paste(save_plot_all, 'Figure2.pdf', sep=""),
+          myplot,
+          base_height = 8,
+          base_width = 8)
+
+
+#################### Fig.3: The impacts of dew duration and climate predictors on vegetation productivity ###########################
+rm(list=ls(all=TRUE))
+
+load("/result/brt_result.RData")
+
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+
+# function
+vio_plt <- function(mydt, myname){
+  
+  # read relative contribution
+  rc_dt <- mydt[[1]]
+  
+  # Assign unique temporary column names
+  colnames(rc_dt) <- make.unique(colnames(rc_dt))
+  
+  long_df <- rc_dt %>%
+    tibble::rownames_to_column(var = "fac") %>%  # Move row names to a column
+    tidyr::pivot_longer(cols = -fac,                   # Use all columns except 'Variable'
+                        names_to = "times",                    # New column for column names
+                        values_to = "rc") 
+  # Reorder the 'Variable' column based on my desired order
+  my_order <- c('DewDur','RH','SWC','Ta','Rn')
+  long_df$fac <- factor(long_df$fac, levels = rev(my_order))
+  
+  # Assign colors manually
+  custom_colors <- c(
+    "DewDur" = '#E78AC3', 
+    "RH" = '#A6D854',
+    "SWC" = '#8DA0CB', 
+    "Ta" = '#FFD92F',
+    "Rn" = '#FC8D62'
+  )
+  
+  # plot violin
+  p <- ggplot(long_df, aes(x = rc, y = fac, fill=fac))+
+    geom_violin(width=1,color="white")+
+    geom_boxplot(width=0.2,cex=0.4, position=position_dodge(0.9),outlier.size=1)+
+    stat_boxplot(geom = 'errorbar',width=0.1,cex=0.4)+
+    labs(x = "Relative Contribution (%)", y = '', title = paste(myname)) +
+    scale_fill_manual(values = custom_colors) +
+    xlim(0, 40)+
+    theme_bw()+
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(),
+      panel.grid.major.x  = element_line(size=0.5, linetype = 'dashed'),
+      panel.border = element_rect(color="black", size=1),
+      axis.ticks.length.x = unit(0.2, "cm"),
+      axis.ticks.length.y = unit(0.2, "cm"),
+      axis.ticks.x = element_line(color="black",size=1,lineend = 1),
+      axis.ticks.y = element_line(color="black",size=1,lineend = 1),
+      axis.text.x = element_text(size=12,color = "black"),
+      axis.text.y = element_text(size=12,color = "black"),
+      axis.title.x = element_text(size=14),
+      legend.position="none")
+  
+  return(p)
+}
+
+p1 <- vio_plt(forest_result, "Forests")
+p2 <- vio_plt(grass_result, "Grasslands")
+p3 <- vio_plt(dry_result, "Drylands")
+p4 <- vio_plt(nondry_result, "Non-drylands")
+
+# save plot 
+combined_plot <- plot_grid(
+  p1,p2,p3,p4,  
+  labels = "auto",
+  label_size = 20,
+  scale = c(0.95),
+  nrow = 2, ncol = 2) 
+
+save_plot_all <- 'myplot/'
+
+save_plot(paste(save_plot_all, 'Figure3.pdf', sep=""),
+          combined_plot,
+          base_height = 10,
+          base_width = 8)
+
+########### Fig.4: The marginal effects of dew duration on vegetation productivity ###########
+rm(list=ls(all=TRUE))
+
+load("result/brt_results.RData")
+
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+
+# function
+pdp_plt <- function(myfac, dt1, dt2, trt1, trt2){
+  
+  fac_dt1 <- data.frame(
+    x = apply(dt1[["pred1"]][[myfac]], 1, mean) %>% round(2),
+    y = apply(dt1[["p1"]][[myfac]], 1, mean) %>% round(2),
+    trait = rep(trt1, times = 100)
+  )
+  
+  fac_dt2 <- data.frame(
+    x = apply(dt2[["pred1"]][[myfac]], 1, mean) %>% round(2),
+    y = apply(dt2[["p1"]][[myfac]], 1, mean) %>% round(2),
+    trait = rep(trt2,times = 100)
+  )
+  
+  fac_dt <- rbind(fac_dt1, fac_dt2)
+  
+  # observation data
+  ob1 <- dt1[["mydf"]]%>% select(1,2)
+  names(ob1)[1:2] <- c("y", "x")
+  
+  ob2 <- dt2[["mydf"]]%>% select(1,2)
+  names(ob2)[1:2] <- c("y", "x")
+  
+  # plot histogram and non-linear relationship 
+  # Upper histogram (forest_ob)
+  bin_dt2 <- ob2 %>%
+    group_by(x) %>%
+    summarise(count = n(), uniquex = length(unique(y)))
+
+  # plt
+  upper_histogram <- ggplot(bin_dt2, aes(x = factor(x), y = count)) +
+    # geom_bar(stat = "identity", fill = "#298d85", alpha = 0.4, width = 1) +
+    geom_bar(stat = "identity", fill = "brown", alpha = 0.4, width = 1) +
+    labs(x = "Dew Duration", y = "Count") +
+    scale_x_discrete(breaks = seq(0, 11, by = 1)) +
+    scale_y_reverse() +
+    ylim(400,0) +
+    theme_bw() +
+    theme(
+      panel.grid = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.y = element_blank(),
+      # axis.text.x = element_blank(),
+      # axis.ticks.x = element_blank()
+    )
+  
+  # Main plot (fac_dt)
+  main_plot <- ggplot(fac_dt, aes(x = x, y = y, color = trait)) +
+    geom_smooth(method = 'loess', span = 0.65, size = 1.2, se = TRUE) +
+    # scale_color_manual(values = c("#D2A679", "#3CA69A")) +
+    scale_color_manual(values = c("brown", "blue")) +
+    labs(x = "Dew Duration(h)", y = "Daily GPP") +
+    scale_y_continuous(
+      limits = c(-0.8, 0.8),
+      breaks = seq(-0.8, 0.8, by = 0.2)
+    ) +
+    scale_x_continuous(breaks = seq(0, 11, by = 1)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  
+    theme_bw() +
+    theme(
+      legend.position = c(0.5, 0.8),
+      axis.text.y = element_blank(),
+      panel.grid = element_blank()      
+    )
+  
+  # Lower histogram (grass_ob)
+  bin_dt1 <- ob1 %>%
+    group_by(x) %>%
+    summarise(count = n(), uniquex = length(unique(y)))
+  
+  # plt
+  lower_histogram <- ggplot(bin_dt1, aes(x = factor(x), y = count)) +
+    # geom_bar(stat = "identity", fill = "#D2A679", alpha = 0.4, width = 1) +
+    geom_bar(stat = "identity", fill = "blue", alpha = 0.4, width = 1) +
+    labs(x = "Dew Duration", y = "Count") +
+    scale_x_discrete(breaks = seq(0, 11, by = 1)) +
+    ylim(0,400) +
+    theme_bw() +
+    theme(
+      panel.grid = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.y = element_blank(),
+      # axis.text.x = element_blank(),
+      # axis.ticks.x = element_blank()
+    )
+    
+  # Combine plots using gridExtra
+  library(gridExtra)
+  pp <- grid.arrange(
+    upper_histogram,
+    main_plot,
+    lower_histogram,
+    ncol = 1,
+    heights = c(1, 2, 1)
+  )
+  
+  return(pp)
+}
+
+p1 <- pdp_plt("DewDur",forest_result, grass_result,
+              "Forests","Grasslands")
+
+p2 <- pdp_plt("DewDur",dry_result, nondry_result,
+              "Drylands","Non-drylands")
+
+# save plot 
+combined_plot <- plot_grid(
+  p1,p2,
+  labels = "auto",
+  label_size = 20,
+  scale = c(0.95),
+  nrow = 1, ncol = 2) 
+
+save_plot_all <- 'myplot/'
+
+save_plot(paste(save_plot_all, 'Figure4.pdf', sep=""),
+          combined_plot,
+          base_height = 8,
+          base_width = 10)
