@@ -259,6 +259,21 @@ reorg_dew_func <- function(site_info,
                       get(paste0(cur_column(), "_sd")),
                     .names = "z_{.col}")) %>%
      select(-ends_with("_mean"), -ends_with("_sd"))
+
+    ############## filter pre and n_dew_empty ##################
+    rain_days <- reorg_dt_z %>%
+      filter(pre_daily > 0, !is.na(pre_daily)) %>%
+      select(site, Date)
+
+    if (nrow(rain_days) == 0) {
+      message("no rainy days")
+      return(mydf)
+    }
+
+    reorg_dt_z_filter <- reorg_dt_z %>%
+      anti_join(rain_days, by = c("site", "Date")) %>%
+      # if there is larger than 1/2 empty value at night, delete this evening
+      filter(n_dew_event_empty <= ((24-dew_st_hr)+dew_ed_hr)*2/2)
     
     ############ connect reorganized data site by site ############
     all_dt_z <- rbind(all_dt_z, reorg_dt_z)
