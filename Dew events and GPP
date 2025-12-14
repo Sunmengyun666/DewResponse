@@ -1,0 +1,272 @@
+rm(list=ls(all=TRUE))
+
+library(REddyProc) 
+library(dplyr)
+library(tibble)
+library(lubridate)
+
+# read meta site information 
+meta_info <- read.csv("/site_info.csv")
+
+# dew period and GPP period time setup 
+my_dew_st_hr <- 20
+my_dew_ed_hr <- 7
+
+my_gpp_st_hr <- 6
+my_gpp_ed_hr <- 18
+
+my_st_gs <- 4
+my_ed_gs <- 10
+
+# function
+reorg_dew_func <- function(site_info, 
+                           dew_st_hr, dew_ed_hr,
+                           gpp_st_hr, gpp_ed_hr,
+                           st_gs, ed_gs){
+  ######### read meta dt #############
+  # read dew data (csv)
+  dew_path <- "/my_dew_dt"
+  # obtain path of all dew CSV files
+  dew_files <- list.files(path = dew_path, pattern = "\\.csv$", full.names = TRUE)
+  
+  # read GPP
+  gpp_path <- "/GPP/gpp_results"
+  # obtain path of all gpp CSV files
+  gpp_files <- list.files(path = gpp_path, pattern = "\\.csv$", full.names = TRUE)
+  
+  # obtain selected dew_files and gpp_files
+  my_dew_files <- dew_files[sapply(dew_files, function(file) {
+    any(sapply(site_info$Site_ID, function(site) {
+      grepl(site, file)
+    }))
+  })]
+  
+  my_gpp_files <- gpp_files[sapply(gpp_files, function(file) {
+    any(sapply(site_info$Site_ID, function(site) {
+      grepl(site, file)
+    }))
+  })]
+  
+  ########### create NA list ################### 
+  all_dt_z <- data.frame()
+  
+  ########### loop for each site ##############
+  for (i in 1:nrow(site_info)){
+    site_name <- site_info[i,1]
+    print(site_name)
+    
+    ########## read and combine dt ##########
+    # +++++++++++++ dew df ++++++++++++++
+    dew_df <- read.csv(my_dew_files[i], na.strings = c("")) %>% 
+      select(-'LE', -'H', -"NEE")
+    
+    dew_df <- fConvertTimeToPosix(dew_df, 'YDH', Year = 'Year', Day ='DoY', Hour ='Hour') %>%
+      # get year and month for calculate mean GPP per month
+      mutate(Year_Month = format(DateTime, "%Y%m")) %>%
+      select(1:6, Year_Month, everything())
+    
+    # calculate VPD
+    dew_df$VPD = fCalcVPDfromRHandTair(dew_df$rH, dew_df$Tair)
+    
+    # ++++++++++++++ calculate dew point temperature and define dew event +++++++++++++++
+    dew_df$Td <- dew_df$Ta - (100 - dew_df$RH) / 5
+    # define dew event
+    dew_df$dewtype <- ifelse(
+      is.na(dew_df$Tc) | is.na(dew_df$Td), 
+      "",                                 # if Tc or Td is missing → empty string 
+      ifelse(dew_df$Tc <= dew_df$Td, "dew", "nodew")  # dew if Tc <= Td, else nodew
+    )
+      
+    # +++++++++++ add information +++++++++++++++++
+    # add site info
+    dew_df$site <- site_info$Name[i]
+    # add region
+    dew_df$region <- site_info$Region[i]
+    # add vegetation
+    dew_df$IGBP <- site_info$IGBP[i]
+    dew_df$veg <- site_info$Veg[i]
+    # # add AI index and range
+    dew_df$AI <- site_info$AI[i]
+    dew_df$AIrange <- site_info$AI_range[i]
+    
+    # +++++++++++++ read GPP ++++++++++++++++++
+    gpp_df <- read.csv(my_gpp_files[i]) %>% select(-'DateTime')
+    gpp_df <- fConvertTimeToPosix(gpp_df, 'YDH', Year = 'Year', Day ='DoY', Hour ='Hour')
+    
+    gpp_df <- gpp_df %>% 
+      select(-'Year',-'DoY',-'Hour') %>%
+      # unit is gC m-2 d-1
+      # if GPP =<0, put is as NA 
+      mutate(GPP_NT = ifelse(GPP_U50_f < 0, NA, GPP_U50_f)) %>%
+      mutate(GPP_DT = ifelse(GPP_DT_U50 < 0, NA, GPP_DT_U50))
+      
+
+    # +++++++++++++ combine dew_df and gpp_df ++++++++++++
+    combined_df <- left_join(gpp_df, dew_df, by = "DateTime")%>%
+      mutate(Date = as.Date(DateTime, format = "%Y-%m-%d %H:%M:%S"))
+    
+    
+    ########## filter dew data: evening + growing season ##############
+    dew_filter <- combined_df %>%
+      # ++++++++++++++ filter evening period ++++++++++++++++++
+      filter(Hour >= dew_st_hr | Hour < dew_ed_hr) %>%
+      # roughly select growing season (4-10)
+      filter(Month >= st_gs-1 & Month <= ed_gs)
+    
+    # ++++++++++++++ treat gs beginning and last date ++++++++++++++++
+    dew_filter <- dew_filter %>%
+      # obtain the start and end date each year of gs
+      group_by(Year) %>%
+      mutate(growth_start = as.Date(paste0(Year, "-03-31")),
+             growth_end = as.Date(paste0(Year, "-", sprintf("%02d", ed_gs), "-31"))) %>%
+      # delete date < year-3-31
+      filter(!(Date < growth_start)) %>%
+      # delete hour < 21 on the day of year-3-31
+      filter(!(Date == growth_start & Hour < dew_ed_hr)) %>%
+      # delete hour >= 7 on the day of year-10-31
+      filter(!(Date == growth_end & Hour >= dew_st_hr)) %>%
+      select(-"growth_start", -'growth_end')
+    
+    # Initialize a results data frame 
+    filter_nightly <- data.frame()
+    
+    # obtain all unique dates 
+    filter_dates <- unique(dew_filter$Date)
+    filter_dates <- filter_dates[!(filter_dates %in% as.Date(c('2017-10-31', '2018-10-31', '2019-10-31',
+                                                               '2020-10-31', '2021-10-31', '2022-10-31' )))]
+    
+    for (t in 1:(length(filter_dates)-1)) {
+      # Data from current day's evening to the next morning
+      single_evening <- dew_filter %>%
+        filter(Date == filter_dates[t] & Hour >= dew_st_hr | Date == filter_dates[t]+1 & Hour < dew_ed_hr)
+      
+      # calculate the sum of rows when Tair/rH/Tc == NA
+      num_empty <- sum(is.na(single_evening[["dewtype"]]) |
+                         single_evening[["dewtype"]] == "")
+      
+      # calculate night Pre (from dew_st_hr to dew_ed_hr)
+      pre_night_sum <- if_else(all(is.na(single_evening$Pre)),NA_real_, 
+                               sum(single_evening$Pre, na.rm = TRUE))
+      
+      if (any(single_evening[["dewtype"]] == "dew", na.rm = TRUE)){
+        # organize data
+        dew_dur <- single_evening %>% 
+          filter(dewtype == 'dew') %>%
+          nrow() * 0.5
+        
+        # summary nightly meteorological variables
+        nightly_summary <- single_evening %>%
+          summarize(
+            Date = filter_dates[t]+1, 
+            pre_night_sum = pre_night_sum,
+            n_dew_event_empty = num_empty,
+            DewType = "dew",
+            n_dew = sum(dewtype == "dew", na.rm = TRUE),
+            DewDur = dew_dur)
+        
+        filter_nightly <- rbind(filter_nightly, nightly_summary)
+      }else{
+        # summary nightly meteorological variables
+        nightly_summary <- single_evening %>%
+          summarize(
+            Date = filter_dates[t]+1,
+            pre_night_sum = pre_night_sum,
+            n_dew_event_empty = num_empty,
+            DewType = "nodew",
+            n_dew = 0,
+            DewDur = 0) 
+        
+        filter_nightly <- rbind(filter_nightly, nightly_summary)
+      }
+    }
+    
+    filter_nightly <- filter_nightly %>%
+      select(-Year)
+    
+    ########## calculate z-score daily gpp and match it with dew data ##########
+    # get flux data
+    gpp_dates <- filter_nightly$Date
+    
+    # filter gpp time
+    gpp_filter <- combined_df %>% 
+      filter(Hour >= gpp_st_hr & Hour < gpp_ed_hr)
+    
+    # info variables
+    keys <- c("Date", "Year", "Month", "Year_Month","DoY",
+              "site", "IGBP","veg", "region", "AI", "AIrange")
+    
+    # ++++++++++++ calculate daily GPP ++++++++++++++
+    gpp_daily <- gpp_filter %>%
+      group_by(across(all_of(keys))) %>%
+      summarise(
+        # flux
+        GPP_NT = if_else(all(is.na(GPP_NT)), NA_real_, mean(GPP_NT, na.rm = TRUE)),
+        GPP_DT = if_else(all(is.na(GPP_DT)), NA_real_, mean(GPP_DT, na.rm = TRUE)),
+        
+        # climatic variables
+        LE = if_else(all(is.na(LE)), NA_real_, mean(LE, na.rm = TRUE)),
+        H = if_else(all(is.na(H)), NA_real_, mean(H, na.rm = TRUE)),
+        Rn = if_else(all(is.na(Rg)), NA_real_, mean(Rg, na.rm = TRUE)),
+        Ta = if_else(all(is.na(Tair)), NA_real_, mean(Tair, na.rm = TRUE)),
+        Tc = if_else(all(is.na(Tc)), NA_real_, mean(Tc, na.rm = TRUE)),
+        RH = if_else(all(is.na(rH)), NA_real_, mean(rH, na.rm = TRUE)),
+        VPD = if_else(all(is.na(VPD)), NA_real_, mean(VPD, na.rm = TRUE)),
+        WS = if_else(all(is.na(U)), NA_real_, mean(U, na.rm = TRUE)),
+        SWC = if_else(all(is.na(SWC)), NA_real_, mean(SWC, na.rm = TRUE)),
+        .groups = 'drop'
+      )
+    
+    # calculate daily pre (from dew_ed_hr to dew_st_hr)
+    pre_daytime <- combined_df %>% 
+      filter(Hour>= dew_ed_hr & Hour < dew_st_hr)%>%
+      group_by(across(all_of(keys))) %>%
+      summarise(
+        pre_daytime_sum = if_else(all(is.na(Pre)), NA_real_, 
+                                  sum(Pre, na.rm = TRUE)),
+        .groups = 'drop')
+    
+    gpp_daily <- left_join(gpp_daily, pre_daytime, by = keys)
+    
+    gpp_daily_filter <- gpp_daily %>% filter(Date %in% gpp_dates)
+    
+    reorg_dt <- left_join(gpp_daily_filter, filter_nightly, by = "Date") %>%
+      mutate(pre_daily = pre_daytime_sum + pre_night_sum) %>%
+      relocate(pre_daily, .after = pre_night_sum)
+    
+    # ++++++++++ calculate z-score gpp +++++++++++++++
+    z_variables <- c("GPP_NT","GPP_DT")
+    
+    # calculate mean and sd monthly
+    monthly_stats <- reorg_dt %>%
+      group_by(Year_Month) %>%
+      summarise(across(all_of(z_variables),
+                       list(mean = ~mean(.x, na.rm = TRUE),
+                            sd = ~sd(.x, na.rm = TRUE)),
+                       .names = "{.col}_{.fn}"))
+    
+    reorg_dt_z <- reorg_dt %>%
+      left_join(monthly_stats, by = "Year_Month")
+    
+    # z-score
+    reorg_dt_z <- reorg_dt_z %>%
+      mutate(across(all_of(z_variables),
+                    ~(. - get(paste0(cur_column(), "_mean"))) /
+                      get(paste0(cur_column(), "_sd")),
+                    .names = "z_{.col}")) %>%
+     select(-ends_with("_mean"), -ends_with("_sd"))
+    
+    ############ connect reorganized data site by site ############
+    all_dt_z <- rbind(all_dt_z, reorg_dt_z)
+
+  }
+  
+  return(all_dt_z)
+}
+
+# get reorganized data
+reorg_dt <- reorg_dew_func(meta_info, 
+                           my_dew_st_hr, my_dew_ed_hr,
+                           my_gpp_st_hr, my_gpp_ed_hr,
+                           my_st_gs, my_ed_gs)
+
+  save.image("/mydata.RData")
