@@ -289,4 +289,4 @@ reorg_dt <- reorg_dew_func(meta_info,
                            my_gpp_st_hr, my_gpp_ed_hr,
                            my_st_gs, my_ed_gs)
 
-  save.image("/mydata.RData")
+  save.image("/result/mydata.RData")
