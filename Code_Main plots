@@ -128,10 +128,10 @@ all_plt <- function(mydf, classify_type, myvar,
   return(pp)
 }
 
-p1 <- all_plt(all_z,'veg','z_GPP_NT', -1, 4.0)
-p2 <- all_plt(all_z,'veg','z_GPP_DT', -1, 4.0)
-p3 <- all_plt(all_z,'region','z_GPP_NT',-1, 4.0)
-p4 <- all_plt(all_z,'region','z_GPP_DT',-1, 4.0)
+p1 <- all_plt(reorg_dt,'veg','z_GPP_NT', -1, 4.0)
+p2 <- all_plt(reorg_dt,'veg','z_GPP_DT', -1, 4.0)
+p3 <- all_plt(reorg_dt,'region','z_GPP_NT',-1, 4.0)
+p4 <- all_plt(reorg_dt,'region','z_GPP_DT',-1, 4.0)
 
 save_plot_all <- 'myplot/'
 
