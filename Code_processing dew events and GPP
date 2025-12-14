@@ -1,3 +1,8 @@
+# Description for this code: 
+# 1. Dew process: Calculate dew events based on meteorological data, define a dew/nodew night and get all valid nights.
+# 2. GPP process: Z-score GPP data, and match them with dew/nodew nights.
+# 3. Data filter and cleaning.
+
 rm(list=ls(all=TRUE))
 
 library(REddyProc) 
