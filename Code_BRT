@@ -1,0 +1,216 @@
+
+rm(list=ls(all=TRUE))
+
+library(dplyr)
+
+################# first step: output dt as csv ##################
+# read data derived from Code_processing dew events and GPP
+load("/mydata.RData")
+
+grass_dt <- reorg_dt %>% filter(veg == "Grasslands")
+forest_dt <- reorg_dt %>% filter(veg == "Forests")
+dry_dt <- reorg_dt %>% filter(region == "Drylands")
+nondry_dt <- reorg_dt %>% filter(region == "Non-drylands")
+
+write.csv(grass_dt, "/mydt/grass_df.csv", row.names = FALSE)
+write.csv(forest_dt, "/mydt/forest_df.csv", row.names = FALSE)
+write.csv(dry_dt, "/mydt/dry_df.csv", row.names = FALSE)
+write.csv(nondry_dt, "/mydt/nondry_df.csv", row.names = FALSE)
+
+########### BRT ###############
+rm(list=ls(all=TRUE))
+
+library(randomForest)
+library(dplyr)
+library(car)
+
+source("/BRT/jane_1390_sm_appendixs/brt.functions.R")
+
+# read path
+mainDir <-"/mydt/"
+# save path
+mainDir1 <- "/result/"
+
+
+setwd(mainDir)
+filenames<-dir(mainDir,'*.csv')
+filepath<-sapply(filenames,function(x){
+  paste(mainDir,x,sep='')
+})
+
+brt_sample <- function(i){
+  df <- read.csv(filepath[i])
+  savename <- substring(filenames[i],1,nchar(filenames[i])-7)
+  print(savename)
+  
+  # reorganize data
+  dewdf <- df %>% 
+    select("z_GPP_NT", "Dewdur",
+           "Rn", "Ta", "RH", "SWC"
+    ) %>%
+    # delete GPP == NA
+    filter(!is.na(.[1]),
+    # delete no dew event 
+           DewDur != 0)
+    
+  
+  response_name   <- names(dewdf)[1]
+  predictor_names <- names(dewdf)[2:6]
+  
+  # Relative contribution summary (rows = predictors, columns = bootstrap runs)
+  mycontri <- data.frame(row.names = predictor_names)
+  
+  # Permutation-based importance (rows = predictors, columns = bootstrap runs)
+  perm_import <- data.frame(row.names = predictor_names)
+  
+  # create null list for PDP
+  n.plots <- nrow(mycontri)
+  pred1 <- list(rep(NA,n.plots))
+  p1 <- list(rep(NA,n.plots))
+  
+  # Container for model performance across bootstraps
+  model_perf <- NULL
+  
+  # run 100 times
+  for (t in 1:100){
+    
+    # bootstrap sample
+    brt.dt <- dewdf[sample(row.names(dewdf),nrow(dewdf),replace=T),]
+    
+    # run model
+    brt.tc3.lr05 <- gbm.step(data = brt.dt,
+                              gbm.x = 2:6, gbm.y = 1,
+                              family = "gaussian",
+                              tree.complexity = 3,
+                              learning.rate = 0.05,
+                              bag.fraction = 0.5,
+                              max.trees = 20000)
+    
+    # ------------ relative contribution ----------
+    rc_vec <- brt.tc3.lr05$contributions$rel.inf
+    names(rc_vec) <- rownames(brt.tc3.lr05$contributions)
+    
+    # Align with predictor_names and bind as a new column
+    mycontri <- cbind(
+      mycontri,
+      setNames(
+        data.frame(rc_vec[rownames(mycontri)]),
+        paste0("boot_", t)
+      )
+    )
+    
+    # ----------- Permutation-based variable importance --------------
+    # Baseline prediction on the bootstrap sample
+    baseline_pred <- predict(
+      brt.tc3.lr05,
+      brt.dt,
+      n.trees = brt.tc3.lr05$gbm.call$best.trees
+    )
+    
+    baseline_rmse <- sqrt(
+      mean((brt.dt[[response_name]] - baseline_pred)^2, na.rm = TRUE)
+    )
+    
+    # Vector to store permutation importance for this bootstrap
+    perm_imp_vec <- numeric(length(predictor_names))
+    names(perm_imp_vec) <- predictor_names
+    
+    # Loop over predictors: permute one at a time
+    for (v in predictor_names) {
+      permuted_dt <- brt.dt
+      permuted_dt[[v]] <- sample(permuted_dt[[v]])  # permute this predictor
+      
+      perm_pred <- predict(
+        brt.tc3.lr05,
+        permuted_dt,
+        n.trees = brt.tc3.lr05$gbm.call$best.trees
+      )
+      
+      perm_rmse <- sqrt(
+        mean((permuted_dt[[response_name]] - perm_pred)^2, na.rm = TRUE)
+      )
+      
+      # Importance = RMSE increase after permutation
+      perm_imp_vec[v] <- perm_rmse - baseline_rmse
+    }
+    
+    # Bind permutation importance for this bootstrap as a new column
+    perm_import <- cbind(
+      perm_import,
+      setNames(
+        data.frame(perm_imp_vec[rownames(perm_import)]),
+        paste0("boot_", t)
+      )
+    )
+    
+    # -------- Collect model performance statistics -----------
+    model_info <- data.frame(
+      cv_correlation = brt.tc3.lr05$cv.statistics$correlation.mean,
+      cv_corr_se = brt.tc3.lr05$cv.statistics$correlation.se,
+      cv_deviance = brt.tc3.lr05$cv.statistics$deviance.mean,
+      cv_devi_se = brt.tc3.lr05$cv.statistics$deviance.se,
+      total_deviance = brt.tc3.lr05$self.statistics$mean.null
+        ) %>%
+      mutate(devi_diff = total_deviance-cv_deviance)
+    
+    # collect model perfamance information
+    if (t==1){
+      model_perf <- model_info
+    }else{
+      model_perf <- rbind(model_perf, model_info)
+    }
+    
+    # --------------- PDP -----------------------
+    pred.names <- brt.tc3.lr05$gbm.call$predictor.names
+    
+    for (b in 1:n.plots){
+      resp.matrix <- plot.gbm(brt.tc3.lr05, i.var = b,
+                              n.trees = brt.tc3.lr05$n.trees,
+                              return.grid = TRUE)
+      if (t==1){
+        pred1[[b]] <- data.frame(n=resp.matrix[,1])
+        p1[[b]] <- data.frame(n=resp.matrix[,2])
+      }else{
+        pred1[[b]] <- cbind(pred1[[b]],n=resp.matrix[,1])
+        p1[[b]] <- cbind(p1[[b]],n=resp.matrix[,2])
+      }
+    }
+    
+  }
+  
+  for (x in 1:length(pred1)){
+    names(pred1)[x] <- pred.names[x]
+    names(p1)[x] <- pred.names[x]
+  }
+  
+  # ----------- output data ---------------
+  # Relative contribution across bootstraps
+  write.table(mycontri, 
+              paste(mainDir1, savename, "_contri.csv", sep=""),
+              sep=",")
+  
+  # Permutation-based importance across bootstraps
+  write.table(
+    perm_import,
+    paste(mainDir1, savename, "_perm_importance.csv", sep = ""),
+    sep = ","
+  )
+  
+  myresult <- list(
+    mycontri    = mycontri,      # GBM relative contributions per bootstrap
+    perm_import = perm_import,   # Permutation-based importance per bootstrap
+    model_perf  = model_perf,    # CV performance across bootstraps
+    pred1       = pred1,         # PDP x-axis grids
+    p1          = p1,            # PDP y-values
+    mydf        = dewdf          # Cleaned input data
+  )
+  
+  return(myresult)
+}
+
+dry_result <- brt_sample(1)
+forest_result <- brt_sample(2)
+grass_result <- brt_sample(3)
+nondry_result <- brt_sample(4)
+
+save.image("/result/brt_result.RData")
