@@ -1,11 +1,11 @@
 # Dew Impact on GPP
 
-This repository contains R scripts for modeling and visualizing the effects of dew duration and environmental variables on Gross Primary Productivity (GPP) across different ecosystems using Boosted Regression Tree (BRT) models.
-
+This repository contains R scripts for 
+- processing dew data and Gross Primary Productivity (GPP) data obtained from NEON sites
+- modeling and visualizing the effects of dew duration and environmental variables on GPP across different ecosystems.
 ---
 
 ## Project Structure
-
 
 - `/jane_1390_sm_appendixs/` – Contains BRT helper functions (e.g., `brt.functions.R`)
 - `/mydt/` – Input folder for CSV files with dew-related variables
@@ -20,6 +20,4 @@ This repository contains R scripts for modeling and visualizing the effects of d
 ## Requirements
 
 You need R and the following packages:
-
-```r
-install.packages(c("dplyr", "ggplot2", "cowplot", "tibble", "tidyr", "gbm"))
+"dplyr", "ggplot2", "cowplot", "tibble", "tidyr", "gbm"
