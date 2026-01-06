@@ -1,4 +1,4 @@
-# Dew Impact on GPP Using Boosted Regression Trees (BRT)
+# Dew Impact on GPP
 
 This repository contains R scripts for modeling and visualizing the effects of dew duration and environmental variables on Gross Primary Productivity (GPP) across different ecosystems using Boosted Regression Tree (BRT) models.
 
