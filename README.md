@@ -6,18 +6,9 @@ This repository contains R scripts for
 ---
 
 ## Project Structure
-
+- `/Code_processing dew events and GPP` – Process dew and GPP data, identify dew events, and create analysis-ready datasets
+- `/Code_Main_plots` – Generate main manuscript figures
+- `/NEON products.xlsx` – Reference table for NEON data products and variables
 - `/jane_1390_sm_appendixs/` – Contains BRT helper functions (e.g., `brt.functions.R`)
-- `/mydt/` – Input folder for CSV files with dew-related variables
-- `/result/` – Stores model output files such as contribution tables
-- `/plt/` – Stores generated plots like violin plots and PDPs
 - `/CodeforBRT.R` – Main R script to run BRT models and generate plots
-- `/README.md` – Project documentation file (this file)
-
-
----
-
-## Requirements
-
-You need R and the following packages:
-"dplyr", "ggplot2", "cowplot", "tibble", "tidyr", "gbm"
+- `/README.md` – Project documentation file
