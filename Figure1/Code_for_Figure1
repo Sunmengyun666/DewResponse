@@ -1,0 +1,229 @@
+rm(list=ls(all=TRUE))
+
+library(readr)
+library(purrr)
+
+# Define folder path
+folder_path <- ".../Figure1/"
+
+# Get all CSV files
+csv_files <- list.files(
+  path = folder_path,
+  pattern = "\\.csv$",
+  full.names = TRUE
+)
+
+# Extract file names without extension
+file_names <- tools::file_path_sans_ext(basename(csv_files))
+
+# Read files into a named list
+data_list <- set_names(
+  map(csv_files, read_csv),
+  file_names
+)
+
+############  Mann-Whitney U test #################
+library(dplyr)
+library(purrr)
+library(tibble)
+
+# ---- single dataset (string colnames) ----
+mw_effect_one_chr <- function(df, group_col, value_col,
+                              alternative = "two.sided", exact = FALSE) {
+  dat <- df %>%
+    select(group = all_of(group_col), value = all_of(value_col)) %>%
+    filter(!is.na(group), !is.na(value))
+  
+  groups <- sort(unique(dat$group))
+  if (length(groups) != 2) {
+    return(tibble(
+      U = NA_real_, Z = NA_real_, p = NA_real_, r = NA_real_,
+      n1 = NA_integer_, n2 = NA_integer_,
+      group1 = NA_character_, group2 = NA_character_,
+      note = "Skipped: group levels != 2 after removing NA"
+    ))
+  }
+  
+  dat$group <- factor(dat$group, levels = groups)
+  
+  mw <- wilcox.test(value ~ group, data = dat,
+                    alternative = alternative, exact = exact)
+  
+  n1 <- sum(dat$group == groups[1])
+  n2 <- sum(dat$group == groups[2])
+  
+  U <- as.numeric(mw$statistic)  # R reports W; for 2-sample this is U for group1
+  mean_U <- n1 * n2 / 2
+  sd_U   <- sqrt(n1 * n2 * (n1 + n2 + 1) / 12)
+  Z      <- (U - mean_U) / sd_U
+  r      <- Z / sqrt(n1 + n2)
+  
+  tibble(
+    U = U, Z = Z, p = mw$p.value, r = r,
+    n1 = n1, n2 = n2,
+    group1 = as.character(groups[1]),
+    group2 = as.character(groups[2]),
+    note = NA_character_
+  )
+}
+
+# ---- list wrapper: infer group + value columns from dataset name ----
+mw_effect_list_infer <- function(data_list,
+                                 alternative = "two.sided", exact = FALSE,
+                                 value_veg = "mean_dew_fre",
+                                 value_region = "mean_dew_fre") {
+  
+  imap_dfr(data_list, function(df, nm) {
+    
+    # infer grouping column from list name
+    group_col <- dplyr::case_when(
+      grepl("_veg$", nm) ~ "veg",
+      grepl("_region$", nm) ~ "region",
+      TRUE ~ NA_character_
+    )
+    
+    # infer value column (customizable if your dur vs freq use different columns)
+    value_col <- dplyr::case_when(
+      grepl("^dew_freq_", nm) ~ value_veg,     # default: mean_dew_fre
+      grepl("^dew_dur_",  nm) ~ value_region,  # change if duration column differs
+      TRUE ~ value_veg
+    )
+    
+    # basic checks
+    if (is.na(group_col)) {
+      return(tibble(dataset = nm, group_col = NA_character_, value_col = value_col,
+                    U = NA_real_, Z = NA_real_, p = NA_real_, r = NA_real_,
+                    n1 = NA_integer_, n2 = NA_integer_,
+                    group1 = NA_character_, group2 = NA_character_,
+                    note = "Skipped: cannot infer group_col from dataset name"))
+    }
+    if (!all(c(group_col, value_col) %in% names(df))) {
+      miss <- paste(setdiff(c(group_col, value_col), names(df)), collapse = ", ")
+      return(tibble(dataset = nm, group_col = group_col, value_col = value_col,
+                    U = NA_real_, Z = NA_real_, p = NA_real_, r = NA_real_,
+                    n1 = NA_integer_, n2 = NA_integer_,
+                    group1 = NA_character_, group2 = NA_character_,
+                    note = paste0("Skipped: missing column(s): ", miss)))
+    }
+    
+    res <- mw_effect_one_chr(df, group_col = group_col, value_col = value_col,
+                             alternative = alternative, exact = exact)
+    
+    res %>% mutate(dataset = nm, group_col = group_col, value_col = value_col, .before = 1)
+  })
+}
+
+mw_summary <- mw_effect_list_infer(
+  data_list,
+  value_veg = "mean_dew_fre",
+  value_region = "mean_dew_dur"
+)
+mw_summary
+
+################# plot #######################
+library(ggplot2)
+library(purrr)
+library(dplyr)
+library(patchwork)
+
+plot_box_list_infer <- function(data_list,
+                                value_veg = "mean_dew_fre",
+                                value_region = "mean_dew_dur",
+                                ncol = 2,
+                                save_plot = TRUE,
+                                output_file = "combined_boxplots.png",
+                                width = 10,
+                                height = 8,
+                                dpi = 300) {
+  
+  # Loop over each dataset in the list (with dataset names)
+  plot_list <- imap(data_list, function(df, nm) {
+    
+    # 1) Infer the grouping column from the dataset name
+    group_col <- case_when(
+      grepl("_veg$", nm)    ~ "veg",
+      grepl("_region$", nm) ~ "region",
+      TRUE                  ~ NA_character_
+    )
+    
+    # 2) Infer the value column from the dataset name
+    value_col <- case_when(
+      grepl("^dew_freq_", nm) ~ value_veg,
+      grepl("^dew_dur_",  nm) ~ value_region,
+      TRUE                    ~ value_veg
+    )
+    
+    # 3) Define y-axis label (publication-friendly)
+    y_lab <- case_when(
+      grepl("^dew_freq_", nm) ~ "Dew Frequency (%)",
+      grepl("^dew_dur_",  nm) ~ "Dew Duration (h)",
+      TRUE                    ~ value_col
+    )
+    
+    # 4) Basic checks (skip if columns are missing)
+    if (is.na(group_col)) {
+      message("Skipped ", nm, ": cannot infer group column.")
+      return(NULL)
+    }
+    if (!all(c(group_col, value_col) %in% names(df))) {
+      missing_cols <- paste(setdiff(c(group_col, value_col), names(df)), collapse = ", ")
+      message("Skipped ", nm, ": missing column(s): ", missing_cols)
+      return(NULL)
+    }
+    
+    # 5) Build the boxplot with median labels
+    p <- ggplot(df, aes_string(x = group_col, y = value_col, fill = group_col)) +
+      stat_boxplot(
+        geom = "errorbar",
+        width = 0.25,       # cap width
+        linewidth = 0.6
+      ) +
+      geom_boxplot(width = 0.6, outlier.shape = NA) +
+      stat_summary(
+        fun = median,
+        geom = "text",
+        aes(label = round(..y.., 1)),
+        vjust = -0.5,
+        size = 4,
+        color = "black"
+      ) +
+      labs(x = NULL, y = y_lab) +
+      theme_classic() +
+      theme(
+        legend.position = "none",
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        axis.text  = element_text(size = 12),
+        axis.title = element_text(size = 13)
+      )
+    
+    p
+  })
+  
+  # Drop NULL plots (if any were skipped)
+  plot_list <- plot_list[!vapply(plot_list, is.null, logical(1))]
+  
+  # 6) Combine all plots into a single figure
+  combined <- wrap_plots(plot_list, ncol = ncol)
+  
+  # Print combined plot
+  print(combined)
+  
+  # # 7) Save combined plot
+  # if (save_plot) {
+  #   ggsave(output_file, combined, width = width, height = height, dpi = dpi)
+  # }
+  
+  return(combined)
+}
+
+combined_plot <- plot_box_list_infer(
+  data_list,
+  value_veg = "mean_dew_fre",
+  value_region = "mean_dew_dur",
+  ncol = 2,
+  save_plot = TRUE,
+  output_file = ".../Figure1/combined_boxplots.jpg",
+  width = 5,
+  height = 8,
+  dpi = 300
+)
