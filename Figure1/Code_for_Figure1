@@ -131,7 +131,7 @@ plot_box_list_infer <- function(data_list,
                                 value_region = "mean_dew_dur",
                                 ncol = 2,
                                 save_plot = TRUE,
-                                output_file = "combined_boxplots.png",
+                                output_file = "combined_boxplots.jpg",
                                 width = 10,
                                 height = 8,
                                 dpi = 300) {
