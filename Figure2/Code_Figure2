@@ -1,0 +1,245 @@
+rm(list=ls(all=TRUE))
+
+library(dplyr)
+library(tibble)
+library(lubridate)
+library(purrr)
+library(tidyr)
+library(effsize)
+library(ggplot2)
+library(ggpubr)
+library(ggpmisc)
+
+all_z <- read.csv(".../Figure2/Processed_data.csv")
+
+############ function ###############
+all_plt <- function(mydf, classify_type, myvar, 
+                    plt_ymin, plt_ymax){
+  # mydf <- all_z
+  # classify_type <- 'veg'
+  # myvar <- 'z_GPP_NT'
+  # plt_ymin <- -1; plt_ymax <- 4
+  
+  # ------- Long format & filter variable -------
+  long_df <- mydf %>%
+    gather(key = "partition", value = "value",
+           z_GPP_DT, z_GPP_NT
+    ) %>% 
+    filter(partition %in% myvar) %>%
+    filter(!is.na(value))
+  
+  
+  # change order
+  long_df$DewType <- factor(long_df$DewType, levels = c("nodew", "dew"))
+  
+  # t-test function for dew and nodew
+  t_test <- function(df){
+    t_test_results <- df %>%
+      group_by(!!sym(classify_type)) %>%
+      do({
+        data_in_group <- .
+        # make sure the order of group
+        data_in_group <- data_in_group %>%
+          mutate(DewType = factor(DewType, levels = c("dew", "nodew")))
+        
+        n_dew    <- sum(data_in_group$DewType == "dew", na.rm = TRUE)
+        n_nodew <- sum(data_in_group$DewType == "nodew", na.rm = TRUE)
+        
+        # Check if both 'nodew' and 'dew' are present in the dewtype
+        dewtypes_present <- all(c('nodew', 'dew') %in% unique(data_in_group$DewType))
+        
+        # Make sure there are at least 2 unique observations for each dewtype
+        dewtypes_ok <- sapply(c('nodew', 'dew'), function(dew) {
+          sum(data_in_group$DewType == dew) >= 2
+        })
+        
+        # If both dewtypes are present and each dewtype has at least 2 observations, conduct t-test
+        if(dewtypes_present && all(dewtypes_ok)) {
+          # t-test
+          t_test_res <- t.test(value ~ DewType, data = data_in_group)
+          
+          # calculate effect size (Cohen's d)
+          d_res <- cohen.d(value ~ DewType, data = data_in_group)
+          
+          # all statistics
+          data.frame(
+            classify_by = classify_type,
+            class_value = unique(data_in_group[[classify_type]]),
+            partition = unique(data_in_group$partition),
+            t_stat = t_test_res$statistic,
+            df = t_test_res$parameter,
+            p_value = t_test_res$p.value,
+            mean_dew = t_test_res$estimate[1],
+            mean_nodew = t_test_res$estimate[2],
+            mean_diff = t_test_res$estimate[1] - t_test_res$estimate[2],
+            ci_low = t_test_res$conf.int[1],
+            ci_high = t_test_res$conf.int[2],
+            significant = t_test_res$p.value < 0.05,
+            cohen_d = d_res$estimate,
+            n_dew     = n_dew,
+            n_nodew  = n_nodew
+          )
+        } else {
+          # if observation is not enough, return NA
+          data.frame(
+            classify_by = classify_type,
+            class_value = unique(data_in_group[[classify_type]]),
+            partition = unique(data_in_group$partition),
+            t_stat = NA,
+            df = NA,
+            p_value = NA,
+            estimate = NA,
+            conf_int = NA,
+            significant = NA,
+            n_dew = n_dew,
+            n_nodew = n_nodew
+          )
+        }
+      }) %>%
+      ungroup()
+    
+    # result
+    # print(t_test_results)
+    
+    # create annotate
+    t_test_results$significant <- ifelse(is.na(t_test_results$p_value), "NA",
+                                         # the p_value retains two decimal places
+                                         ifelse(t_test_results$p_value < 0.001, "***",
+                                                ifelse(t_test_results$p_value < 0.01, "**",
+                                                       ifelse(t_test_results$p_value < 0.05, "*",
+                                                              ifelse(t_test_results$p_value < 0.1, paste0("p=", formatC(t_test_results$p_value, format="f", digits=2),"`"),
+                                                                     paste0("p=", formatC(t_test_results$p_value, format="f", digits=2)))))))
+    
+    return(t_test_results)
+  }
+  
+  t_test_results <- t_test(long_df) %>%
+    select(-!!sym(classify_type))
+  
+  # ------------ plot ---------------------
+  pp <- ggplot(long_df, aes(x = factor(!!sym(classify_type) 
+                                       # ,levels = c("Forests","Grasslands","Arid","Humid","Allsites")
+  ),
+  y = value, fill = DewType)) +
+    geom_boxplot(outlier.shape = NA, 
+                 color = "black") +
+    scale_fill_manual(values = c("dew" = "#3a82b7", "nodew" = "white"))
+  
+  plot_data <- ggplot_build(pp)$data[[1]]
+  pp <- pp +
+    # Add orange horizontal lines for the means
+    geom_segment(data = plot_data,
+                 aes(x = x-0.17, xend = x + 0.17, y = middle, yend = middle),
+                 size = 2, 
+                 inherit.aes = FALSE,
+                 color = "#ff8b17")+
+    # Add black horizontal lines for upper
+    geom_segment(data = plot_data,
+                 aes(x = x-0.08, xend = x + 0.08, y = ymax, yend = ymax),
+                 inherit.aes = FALSE,
+                 color = "black")+ 
+    # all dew events
+    coord_cartesian(ylim = c(plt_ymin, plt_ymax))+
+    # # adjenct
+    # ylim(-1.6, 1.6)+
+    labs(x = "", y = myvar) +
+    theme_minimal()+ 
+    theme(
+      legend.position = "none",
+      panel.border = element_rect(colour = "black", fill=NA, size=1),
+      panel.grid = element_blank(),
+      axis.text.x = element_text(size=10),
+      axis.text.y = element_text(size=10),
+      axis.title.x = element_text(size=12),
+      axis.title.y = element_text(size=12),
+      axis.ticks.y = element_line(color = "black",size=1),
+      axis.ticks.x = element_line(color = "black",size=1),
+      axis.ticks.length = unit(0.15, "cm") 
+    )+ 
+    # add significance stars
+    geom_text(data = t_test_results, aes(x = class_value, y = plt_ymax-0.3, label = significant),
+              color = "black", size = 5, inherit.aes = FALSE)
+  
+  # add sample n
+  dodge_w <- 0.75
+  
+  n_annot <- t_test_results %>%
+    select(class_value, n_nodew, n_dew) %>%
+    pivot_longer(
+      cols = c(n_nodew, n_dew),
+      names_to = "DewType",
+      values_to = "n"
+    ) %>%
+    mutate(
+      DewType = recode(DewType, n_nodew = "nodew", n_dew = "dew"),
+      label = paste0("n=", n)
+    )
+  n_annot$DewType <- factor(n_annot$DewType,
+                            levels = c("nodew", "dew"))
+  
+  pp <- pp +
+    geom_text(
+      data = n_annot,
+      aes(
+        x = class_value,
+        y = plt_ymax - 0.8,
+        label = label,
+        group = DewType
+      ),
+      position = position_dodge(width = dodge_w),
+      inherit.aes = FALSE,
+      size = 3.5,
+      color = "black",
+      vjust = 0
+    )
+  
+  return(list(
+    plot = pp,
+    t_test = t_test_results
+  ))
+}
+
+############ results ###############
+jobs <- list(
+  list(classify_type = "veg",    myvar = "z_GPP_NT", plt_ymin = -1, plt_ymax = 4.0),
+  list(classify_type = "region", myvar = "z_GPP_NT", plt_ymin = -1, plt_ymax = 4.0),
+  list(classify_type = "veg",    myvar = "z_GPP_DT", plt_ymin = -1, plt_ymax = 4.0),
+  list(classify_type = "region", myvar = "z_GPP_DT", plt_ymin = -1, plt_ymax = 4.0)
+)
+
+result_list <- lapply(jobs, function(j) {
+  all_plt(
+    mydf = all_z,
+    classify_type = j$classify_type,
+    myvar = j$myvar,
+    plt_ymin = j$plt_ymin,
+    plt_ymax = j$plt_ymax
+  )
+})
+
+# t-test results
+t_test_df <- bind_rows(lapply(result_list, `[[`, "t_test"))
+
+# plot list
+plot_list <- lapply(result_list, `[[`, "plot")
+
+########### output results #################
+save_plot_all <- '.../Figure2/'
+
+# ---------- output plot --------------
+library(cowplot)
+myplot <- plot_grid(plotlist = plot_list,
+                    nrow = 2,  # Specify number of rows
+                    ncol = 2,  # Specify number of columns
+                    labels = "auto",  # Automatically label the plots
+                    label_size = 20,  # Label size
+                    scale = c(0.95))  # Scale the plots
+
+save_plot(paste(save_plot_all, 'Figure2.pdf', sep=""),
+          myplot,
+          base_height = 8,
+          base_width = 8)
+
+# ---------- output t-test results (Supplementary Table 3) --------------
+library(readr)
+write_csv(t_test_df, paste0(save_plot_all, 't_test_result.csv'))
