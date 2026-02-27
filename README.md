@@ -2,13 +2,14 @@
 
 This repository contains R scripts for 
 - processing dew data and Gross Primary Productivity (GPP) data obtained from NEON sites
-- modeling and visualizing the effects of dew duration and environmental variables on GPP across different ecosystems.
+- modeling the effects of dew duration and environmental variables on GPP across different ecosystems
+- visualizing four figures in the main text
 ---
 
 ## Project Structure
-- `/Code_processing dew events and GPP` – Process dew and GPP data, identify dew events, and create analysis-ready datasets
-- `/Code_Main_plots` – Generate main manuscript figures
+- `/Dew and GPP` – Process dew and GPP data, identify dew events, and create analysis-ready datasets (Processed_data.csv)
+- `/BRT` - Run BRT models
+-      `/jane_1390_sm_appendixs/` – Contains BRT helper functions (e.g., `brt.functions.R`)
 - `/NEON products.xlsx` – Reference table for NEON data products and variables
-- `/jane_1390_sm_appendixs/` – Contains BRT helper functions (e.g., `brt.functions.R`)
-- `/CodeforBRT.R` – Main R script to run BRT models and generate plots
+- `/site_info.csv`– Reference table for NEON sites and infomation, also used when processing dew and GPP data
 - `/README.md` – Project documentation file
