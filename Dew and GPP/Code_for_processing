@@ -11,7 +11,7 @@ library(tibble)
 library(lubridate)
 
 # read meta site information 
-meta_info <- read.csv("/site_info.csv")
+meta_info <- read.csv(".../site_info.csv")
 
 # dew period and GPP period time setup 
 my_dew_st_hr <- 20
@@ -20,6 +20,7 @@ my_dew_ed_hr <- 7
 my_gpp_st_hr <- 6
 my_gpp_ed_hr <- 18
 
+# growing season
 my_st_gs <- 4
 my_ed_gs <- 10
 
@@ -30,12 +31,12 @@ reorg_dew_func <- function(site_info,
                            st_gs, ed_gs){
   ######### read meta dt #############
   # read dew data (csv)
-  dew_path <- "/my_dew_dt"
+  dew_path <- ".../my_dew_dt"
   # obtain path of all dew CSV files
   dew_files <- list.files(path = dew_path, pattern = "\\.csv$", full.names = TRUE)
   
   # read GPP
-  gpp_path <- "/GPP/gpp_results"
+  gpp_path <- ".../GPP/gpp_results"
   # obtain path of all gpp CSV files
   gpp_files <- list.files(path = gpp_path, pattern = "\\.csv$", full.names = TRUE)
   
@@ -88,11 +89,8 @@ reorg_dew_func <- function(site_info,
     # add region
     dew_df$region <- site_info$Region[i]
     # add vegetation
-    dew_df$IGBP <- site_info$IGBP[i]
     dew_df$veg <- site_info$Veg[i]
-    # # add AI index and range
-    dew_df$AI <- site_info$AI[i]
-    dew_df$AIrange <- site_info$AI_range[i]
+
     
     # +++++++++++++ read GPP ++++++++++++++++++
     gpp_df <- read.csv(my_gpp_files[i]) %>% select(-'DateTime')
@@ -198,7 +196,7 @@ reorg_dew_func <- function(site_info,
     
     # info variables
     keys <- c("Date", "Year", "Month", "Year_Month","DoY",
-              "site", "IGBP","veg", "region", "AI", "AIrange")
+              "site", "veg", "region")
     
     # ++++++++++++ calculate daily GPP ++++++++++++++
     gpp_daily <- gpp_filter %>%
@@ -290,4 +288,4 @@ reorg_dt <- reorg_dew_func(meta_info,
                            my_st_gs, my_ed_gs)
 
 save.image(".../result/mydata.RData")
-write.csv(reorg_dt, "...result/Source data.csv", row.names = FALSE)
+write.csv(reorg_dt, "...result/Processed data.csv", row.names = FALSE)
