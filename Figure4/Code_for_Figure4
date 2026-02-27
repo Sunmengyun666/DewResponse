@@ -1,0 +1,170 @@
+rm(list=ls(all=TRUE))
+
+library(dplyr)
+library(gridExtra)
+library(ggplot2)
+library(cowplot)
+
+# -------------- read data ----------------
+path <- ".../Figure4"
+files <- list.files(path, pattern = "\\.csv$", full.names = TRUE)
+
+read_group <- function(prefix) {
+  f <- files[grepl(paste0("^", prefix, "_"), basename(files))]
+  out <- lapply(f, read.csv)
+  
+  nm <- basename(f)
+  nm <- sub(paste0("^", prefix, "_"), "", nm)
+  nm <- sub("\\.csv$", "", nm)
+  
+  names(out) <- nm
+  out
+}
+
+dry_result     <- read_group("dry")
+forest_result  <- read_group("forest")
+grass_result   <- read_group("grass")
+nondry_result  <- read_group("nondry")
+
+# ############ histogram #################
+pdp_plt <- function(myfac, dt1, dt2, trt1, trt2,
+                    hist_fill1, hist_fill2,
+                    line_colors){
+  # myfac <- "DewDur"
+  # dt1 <- forest_result; dt2 <- grass_result
+  # trt1 <- "forest"; trt2 <- "grass"
+  
+  # ------------ predicted data -----------------
+  fac_dt1 <- data.frame(
+    x = dt1[["pred1"]] %>%
+      select(starts_with(myfac)) %>%
+      rowMeans(na.rm = TRUE) %>%
+      round(2),
+    y = dt1[["p1"]] %>%
+      select(starts_with(myfac)) %>%
+      rowMeans(na.rm = TRUE) %>%
+      round(2),
+    trait = rep(trt1, times = 100)
+  )
+  
+  fac_dt2 <- data.frame(
+    x = dt2[["pred1"]] %>%
+      select(starts_with(myfac)) %>%
+      rowMeans(na.rm = TRUE) %>%
+      round(2),
+    y = dt2[["p1"]] %>%
+      select(starts_with(myfac)) %>%
+      rowMeans(na.rm = TRUE) %>%
+      round(2),
+    trait = rep(trt2, times = 100)
+  )
+  
+  fac_dt <- rbind(fac_dt1, fac_dt2)
+  
+  # ------------- observation data ---------------------
+  ob1 <- dt1[["df"]]%>% select(1,2)
+  names(ob1)[1:2] <- c("y", "x")
+  
+  ob2 <- dt2[["df"]]%>% select(1,2)
+  names(ob2)[1:2] <- c("y", "x")
+  
+  # ------------ plot histogram and non-linear relationship ---------
+  
+  # Upper histogram (forest_ob)
+  bin_dt2 <- ob2 %>%
+    group_by(x) %>%
+    summarise(count = n(), uniquex = length(unique(y)))
+  
+  # plt
+  upper_histogram <- ggplot(bin_dt2, aes(x = factor(x), y = count)) +
+    geom_bar(stat = "identity", fill = hist_fill1, alpha = 0.4, width = 1) +
+    labs(x = "Dew Duration", y = "Histogram Count") +
+    scale_x_discrete(breaks = seq(0, 11, by = 1)) +
+    scale_y_reverse() +
+    ylim(400,0) +
+    theme_bw() +
+    theme(
+      panel.grid = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.y = element_blank()
+    )
+  
+  # Main plot (fac_dt)
+  main_plot <- ggplot(fac_dt, aes(x = x, y = y, color = trait)) +
+    geom_smooth(method = 'loess', span = 0.65, size = 1.2, se = TRUE) +
+    scale_color_manual(values = line_colors) +
+    labs(x = "Dew Duration(h)", y = "Daily GPP") +
+    scale_y_continuous(
+      limits = c(-0.8, 0.8),
+      breaks = seq(-0.8, 0.8, by = 0.2)
+    ) +
+    scale_x_continuous(breaks = seq(0, 11, by = 1)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  
+    theme_bw() +
+    theme(
+      legend.position = c(0.5, 0.8),
+      axis.text.y = element_blank(),
+      panel.grid = element_blank()      
+    )
+  
+  # Lower histogram (grass_ob)
+  bin_dt1 <- ob1 %>%
+    group_by(x) %>%
+    summarise(count = n(), uniquex = length(unique(y)))
+  
+  # plt
+  lower_histogram <- ggplot(bin_dt1, aes(x = factor(x), y = count)) +
+    geom_bar(stat = "identity", fill = hist_fill2, alpha = 0.4, width = 1) +
+    labs(x = "Dew Duration", y = "Histogram Count") +
+    scale_x_discrete(breaks = seq(0, 11, by = 1)) +
+    ylim(0,400) +
+    theme_bw() +
+    theme(
+      panel.grid = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.y = element_blank()
+    )
+  
+  # Combine plots using gridExtra
+
+  pp <- grid.arrange(
+    upper_histogram,
+    main_plot,
+    lower_histogram,
+    ncol = 1,
+    heights = c(1, 2, 1)
+  )
+  
+  return(pp)
+}
+
+p1 <- pdp_plt("DewDur",
+              forest_result, grass_result,
+              "Forests","Grasslands",
+              hist_fill1 = "#D2A679",hist_fill2 = "#3CA69A",
+              line_colors = c("#D2A679", "#3CA69A"))
+
+p2 <- pdp_plt("DewDur",dry_result, nondry_result,
+              "Drylands","Non-drylands",
+              hist_fill1 = "brown",hist_fill2 = "blue", 
+              line_colors = c("brown", "blue"))
+
+# save plot 
+combined_plot <- plot_grid(
+  p1,p2,
+  labels = "auto",
+  label_size = 20,
+  scale = c(0.95),
+  nrow = 1, ncol = 2) 
+
+save_plot_all <- '.../Figure4/'
+
+save_plot(paste(save_plot_all, 'pdp.jpg', sep=""),
+          combined_plot,
+          base_height = 8,
+          base_width = 10)
+
+save_plot(paste(save_plot_all, 'pdp.pdf', sep=""),
+          combined_plot,
+          base_height = 8,
+          base_width = 10)
