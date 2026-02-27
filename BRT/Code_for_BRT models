@@ -5,26 +5,23 @@ library(dplyr)
 
 ################# first step: output dt as csv ##################
 # read data derived from Code_processing dew events and GPP
-load("/mydata.RData")
+reorg_dt <- read.csv(".../BRT/Source_data.csv")
 
 grass_dt <- reorg_dt %>% filter(veg == "Grasslands")
 forest_dt <- reorg_dt %>% filter(veg == "Forests")
 dry_dt <- reorg_dt %>% filter(region == "Drylands")
 nondry_dt <- reorg_dt %>% filter(region == "Non-drylands")
 
-write.csv(grass_dt, "/mydt/grass_df.csv", row.names = FALSE)
-write.csv(forest_dt, "/mydt/forest_df.csv", row.names = FALSE)
-write.csv(dry_dt, "/mydt/dry_df.csv", row.names = FALSE)
-write.csv(nondry_dt, "/mydt/nondry_df.csv", row.names = FALSE)
+write.csv(grass_dt, "/BRT/grass_df.csv", row.names = FALSE)
+write.csv(forest_dt, "/BRT/forest_df.csv", row.names = FALSE)
+write.csv(dry_dt, "/BRT/dry_df.csv", row.names = FALSE)
+write.csv(nondry_dt, "/BRT/nondry_df.csv", row.names = FALSE)
 
 ########### BRT ###############
 rm(list=ls(all=TRUE))
 
-library(randomForest)
 library(dplyr)
-library(car)
-
-source("/BRT/jane_1390_sm_appendixs/brt.functions.R")
+source(".../BRT/jane_1390_sm_appendixs/brt.functions.R")
 
 # read path
 mainDir <-"/mydt/"
@@ -78,17 +75,17 @@ brt_sample <- function(i){
     brt.dt <- dewdf[sample(row.names(dewdf),nrow(dewdf),replace=T),]
     
     # run model
-    brt.tc3.lr05 <- gbm.step(data = brt.dt,
-                              gbm.x = 2:6, gbm.y = 1,
-                              family = "gaussian",
-                              tree.complexity = 3,
-                              learning.rate = 0.05,
-                              bag.fraction = 0.5,
-                              max.trees = 20000)
+    brt.result <- gbm.step(data = brt.dt,
+                           gbm.x = 2:6, gbm.y = 1,
+                           family = "gaussian",
+                           tree.complexity = 3,
+                           learning.rate = 0.01,
+                           bag.fraction = 0.5,
+                           max.trees = 20000)
     
     # ------------ relative contribution ----------
-    rc_vec <- brt.tc3.lr05$contributions$rel.inf
-    names(rc_vec) <- rownames(brt.tc3.lr05$contributions)
+    rc_vec <- brt.result$contributions$rel.inf
+    names(rc_vec) <- rownames(brt.result$contributions)
     
     # Align with predictor_names and bind as a new column
     mycontri <- cbind(
@@ -102,9 +99,9 @@ brt_sample <- function(i){
     # ----------- Permutation-based variable importance --------------
     # Baseline prediction on the bootstrap sample
     baseline_pred <- predict(
-      brt.tc3.lr05,
+      brt.result,
       brt.dt,
-      n.trees = brt.tc3.lr05$gbm.call$best.trees
+      n.trees = brt.result$gbm.call$best.trees
     )
     
     baseline_rmse <- sqrt(
@@ -121,9 +118,9 @@ brt_sample <- function(i){
       permuted_dt[[v]] <- sample(permuted_dt[[v]])  # permute this predictor
       
       perm_pred <- predict(
-        brt.tc3.lr05,
+        brt.result,
         permuted_dt,
-        n.trees = brt.tc3.lr05$gbm.call$best.trees
+        n.trees = brt.result$gbm.call$best.trees
       )
       
       perm_rmse <- sqrt(
@@ -145,11 +142,11 @@ brt_sample <- function(i){
     
     # -------- Collect model performance statistics -----------
     model_info <- data.frame(
-      cv_correlation = brt.tc3.lr05$cv.statistics$correlation.mean,
-      cv_corr_se = brt.tc3.lr05$cv.statistics$correlation.se,
-      cv_deviance = brt.tc3.lr05$cv.statistics$deviance.mean,
-      cv_devi_se = brt.tc3.lr05$cv.statistics$deviance.se,
-      total_deviance = brt.tc3.lr05$self.statistics$mean.null
+      cv_correlation = brt.result$cv.statistics$correlation.mean,
+      cv_corr_se = brt.result$cv.statistics$correlation.se,
+      cv_deviance = brt.result$cv.statistics$deviance.mean,
+      cv_devi_se = brt.result$cv.statistics$deviance.se,
+      total_deviance = brt.result$self.statistics$mean.null
         ) %>%
       mutate(devi_diff = total_deviance-cv_deviance)
     
@@ -161,11 +158,11 @@ brt_sample <- function(i){
     }
     
     # --------------- PDP -----------------------
-    pred.names <- brt.tc3.lr05$gbm.call$predictor.names
+    pred.names <- brt.result$gbm.call$predictor.names
     
     for (b in 1:n.plots){
-      resp.matrix <- plot.gbm(brt.tc3.lr05, i.var = b,
-                              n.trees = brt.tc3.lr05$n.trees,
+      resp.matrix <- plot.gbm(brt.result, i.var = b,
+                              n.trees = brt.result$n.trees,
                               return.grid = TRUE)
       if (t==1){
         pred1[[b]] <- data.frame(n=resp.matrix[,1])
@@ -213,4 +210,4 @@ forest_result <- brt_sample(2)
 grass_result <- brt_sample(3)
 nondry_result <- brt_sample(4)
 
-save.image("/result/brt_result.RData")
+save.image(".../BRT/result/brt_result.RData")
