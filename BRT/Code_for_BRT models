@@ -5,17 +5,17 @@ library(dplyr)
 
 ################# first step: output dt as csv ##################
 # read data derived from Code_processing dew events and GPP
-reorg_dt <- read.csv(".../BRT/Source_data.csv")
+reorg_dt <- read.csv(".../Source_data.csv")
 
 grass_dt <- reorg_dt %>% filter(veg == "Grasslands")
 forest_dt <- reorg_dt %>% filter(veg == "Forests")
 dry_dt <- reorg_dt %>% filter(region == "Drylands")
 nondry_dt <- reorg_dt %>% filter(region == "Non-drylands")
 
-write.csv(grass_dt, "/BRT/grass_df.csv", row.names = FALSE)
-write.csv(forest_dt, "/BRT/forest_df.csv", row.names = FALSE)
-write.csv(dry_dt, "/BRT/dry_df.csv", row.names = FALSE)
-write.csv(nondry_dt, "/BRT/nondry_df.csv", row.names = FALSE)
+write.csv(grass_dt, ".../BRT/grass_df.csv", row.names = FALSE)
+write.csv(forest_dt, ".../BRT/forest_df.csv", row.names = FALSE)
+write.csv(dry_dt, ".../BRT/dry_df.csv", row.names = FALSE)
+write.csv(nondry_dt, ".../BRT/nondry_df.csv", row.names = FALSE)
 
 ########### BRT ###############
 rm(list=ls(all=TRUE))
@@ -24,9 +24,9 @@ library(dplyr)
 source(".../BRT/jane_1390_sm_appendixs/brt.functions.R")
 
 # read path
-mainDir <-"/mydt/"
+mainDir <-".../BRT/"
 # save path
-mainDir1 <- "/result/"
+mainDir1 <- ".../result/"
 
 
 setwd(mainDir)
